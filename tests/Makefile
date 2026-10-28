@@ -6,6 +6,13 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -g -O1 -fsanitize=address,undefined
             -fno-sanitize-recover=undefined -ffp-contract=off -I$(SRC)/core -I$(SRC) -I. -MMD
 LDFLAGS  := -fsanitize=address,undefined
 
+# Keep instrumented objects separate from ordinary sanitizer builds.
+ifeq ($(COVERAGE),1)
+OUT := ../build/coverage-tests
+CXXFLAGS += --coverage
+LDFLAGS += --coverage
+endif
+
 CORE_SRCS := $(shell find $(SRC)/core -name '*.cpp')
 CORE_OBJS := $(patsubst $(SRC)/%.cpp,$(OUT)/obj/%.o,$(CORE_SRCS))
 TEST_SRCS := $(filter-out usb_desc_test.cpp,$(wildcard *_test.cpp))

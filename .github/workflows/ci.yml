@@ -24,19 +24,52 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install GCC 14
-        run: sudo apt-get update && sudo apt-get install -y g++-14
+        run: sudo apt-get update && sudo apt-get install -y g++-14 python3-venv
+      - name: Install coverage reporter
+        run: |
+          python3 -m venv .coverage-venv
+          .coverage-venv/bin/pip install gcovr==8.4
       # ASan aborts at start-up under the runners' 32-bit mmap randomisation.
       - name: Limit mmap randomisation for AddressSanitizer
         run: sudo sysctl -w vm.mmap_rnd_bits=28
       - name: Host tests
         run: |
           set -o pipefail
-          if ! make -j"$(nproc)" host-test CC=gcc-14 CXX=g++-14 2>&1 | tee host-tests.log; then
+          if ! make -j"$(nproc)" host-test CC=gcc-14 CXX=g++-14 COVERAGE=1 2>&1 | tee host-tests.log; then
             # Errors as annotations: readable on the run page without log access.
             grep -E "error:|\*\*\*|FAIL|[1-9][0-9]* failures|Sanitizer|DEADLYSIGNAL|runtime error" host-tests.log \
               | grep -vE "^(g\+\+|gcc|ar|objcopy)" | head -10 | while IFS= read -r line; do echo "::error::${line}"; done
             exit 1
           fi
+      - name: Generate coverage reports
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p build/coverage
+          .coverage-venv/bin/gcovr --root . build/coverage-tests \
+            --gcov-executable gcov-14 \
+            --filter 'src/core/' --filter 'sim/src/host_storage\.(cpp|h)$' \
+            --exclude-unreachable-branches --exclude-throw-branches \
+            --html-details build/coverage/index.html \
+            --cobertura build/coverage/coverage.xml \
+            --json-summary build/coverage/summary.json \
+            --markdown-summary build/coverage/summary.md \
+            --print-summary
+          {
+            echo '## Host test coverage'
+            echo
+            echo 'Core and simulator storage; hardware drivers and third-party code excluded.'
+            echo 'Public fixtures only; tests requiring private vendor fixtures may skip.'
+            echo 'Compiler-generated unreachable and exception-handling branches excluded.'
+            echo
+            cat build/coverage/summary.md
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.sha }}
+          path: build/coverage/
+          if-no-files-found: error
       - name: telemetry_check self-test
         run: python3 tools/telemetry_check.py selftest
 
